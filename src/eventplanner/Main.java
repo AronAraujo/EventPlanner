@@ -8,19 +8,29 @@ import javax.swing.*;
 import java.awt.*;
 import java.time.LocalDate;
 
+/**
+ * Program entry point.
+ *
+ * Builds the main window: splits the screen into two side-by-side parts
+ * (JSplitPane) — calendar on the left, day events on the right —
+ * and checks for pending reminders as soon as the program starts.
+ */
 public class Main {
 
     public static void main(String[] args) {
-        // Garante execução na Event Dispatch Thread do Swing
+        // Ensures execution on Swing's Event Dispatch Thread
+        // (all Swing UI must run on this specific thread)
         SwingUtilities.invokeLater(Main::launch);
     }
 
     private static void launch() {
-        // Look and feel nativo do sistema
+     
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception ignored) {}
 
+        // controller is the "brain" of the system — stores events and
+        // loads whatever is saved in the CSV file
         EventController controller = new EventController();
 
         JFrame frame = new JFrame("Event Planner");
@@ -28,26 +38,31 @@ public class Main {
         frame.setMinimumSize(new Dimension(900, 620));
         frame.setPreferredSize(new Dimension(1100, 700));
 
-        // Layout principal: sidebar esquerda (calendário) + painel direito (eventos do dia)
+        // Main layout: left sidebar (calendar) + right panel (day events)
+        // JSplitPane divides the screen into two areas with a draggable divider
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
         split.setDividerLocation(300);
         split.setDividerSize(1);
         split.setBorder(null);
 
-        // Usa array para permitir referência no lambda antes da atribuição
+        // Uses array to allow reference inside lambda before assignment
         DayPanel[] dayPanelRef = new DayPanel[1];
 
-        // Painel direito de eventos
+        // Right panel: list of events for the selected day
+        // The second parameter is a callback function triggered when the user
+        // clicks "Edit" or "Delete" on an event in the list
         dayPanelRef[0] = new DayPanel(controller, (event, action) -> {
             if ("delete".equals(action)) {
+                // asks for confirmation before deleting, to avoid accidental clicks
                 int opt = JOptionPane.showConfirmDialog(frame,
-                    "Excluir o evento \"" + event.getTitle() + "\"?",
-                    "Confirmar exclusão", JOptionPane.YES_NO_OPTION);
+                    "Delete event \"" + event.getTitle() + "\"?",
+                    "Confirm deletion", JOptionPane.YES_NO_OPTION);
                 if (opt == JOptionPane.YES_OPTION) {
                     controller.deleteEvent(event.getId());
-                    dayPanelRef[0].refreshEvents();
+                    dayPanelRef[0].refreshEvents(); // updates the UI list
                 }
             } else if ("edit".equals(action)) {
+                // opens the same event creation form, but pre-filled
                 EventDialog dlg = new EventDialog(frame, event, event.getDate());
                 dlg.setVisible(true);
                 if (dlg.getResult() != null) {
@@ -56,10 +71,13 @@ public class Main {
                 }
             }
         });
-        DayPanel dayPanel = dayPanelRef[0];
-        dayPanel.showDate(LocalDate.now());
 
-        // Painel esquerdo: calendário + botão "Novo Evento"
+        DayPanel dayPanel = dayPanelRef[0];
+        dayPanel.showDate(LocalDate.now()); // on startup, show today's date
+
+        // Left panel: calendar + "New Event" button
+        // The second parameter is called when the user clicks a date
+        // in the calendar — it tells DayPanel to show that day's events
         CalendarPanel calendarPanel = new CalendarPanel(controller, date -> {
             dayPanel.showDate(date);
         });
@@ -67,8 +85,8 @@ public class Main {
         JPanel leftPanel = new JPanel(new BorderLayout());
         leftPanel.setBackground(Theme.BG_CARD);
 
-        // Botão "+ Novo Evento"
-        JButton btnNew = new JButton("+ Novo Evento") {
+        // "+ New Event" button — overrides paintComponent
+        JButton btnNew = new JButton("+ New Event") {
             @Override
             protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g.create();
@@ -87,18 +105,20 @@ public class Main {
         btnNew.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btnNew.setPreferredSize(new Dimension(Integer.MAX_VALUE, 40));
         btnNew.addActionListener(e -> {
+            // opens empty form (null = creating new, not editing)
+            // already with the date selected in the calendar
             LocalDate selected = calendarPanel.getSelectedDate();
             EventDialog dlg = new EventDialog(frame, null, selected);
             dlg.setVisible(true);
             if (dlg.getResult() != null) {
                 controller.addEvent(dlg.getResult());
-                calendarPanel.render();
-                dayPanel.showDate(selected);
+                calendarPanel.render();        // redraws calendar (may highlight new day)
+                dayPanel.showDate(selected);    // updates day list
             }
         });
 
-        // Botão "Buscar"
-        JButton btnSearch = new JButton("🔍 Buscar") {
+        // "Search" button — same rounded-corner trick, different color
+        JButton btnSearch = new JButton("🔍 Search") {
             @Override
             protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g.create();
@@ -121,6 +141,7 @@ public class Main {
             sp.setVisible(true);
         });
 
+        // combines both buttons into one panel, stacked vertically
         JPanel btnPanel = new JPanel(new GridLayout(2, 1, 0, 6));
         btnPanel.setBackground(Theme.BG_CARD);
         btnPanel.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 16, 16, 16));
@@ -130,20 +151,21 @@ public class Main {
         leftPanel.add(calendarPanel, BorderLayout.CENTER);
         leftPanel.add(btnPanel, BorderLayout.SOUTH);
 
+        // builds split: calendar on the left, day events on the right
         split.setLeftComponent(leftPanel);
         split.setRightComponent(dayPanel);
 
         frame.setContentPane(split);
         frame.pack();
-        frame.setLocationRelativeTo(null);
+        frame.setLocationRelativeTo(null); // centers the window
         frame.setVisible(true);
 
-        // Verificar lembretes ao iniciar
+        // Checks reminders on startup — only once when program opens
         var reminders = controller.getUpcomingReminders();
         if (!reminders.isEmpty()) {
-            StringBuilder sb = new StringBuilder("Lembretes nas próximas 24h:\n");
+            StringBuilder sb = new StringBuilder("Reminders in the next 24h:\n");
             reminders.forEach(r -> sb.append("• ").append(r.getTitle()).append(" - ").append(r.getDate()).append("\n"));
-            JOptionPane.showMessageDialog(frame, sb.toString(), "Lembretes", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(frame, sb.toString(), "Reminders", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 }
